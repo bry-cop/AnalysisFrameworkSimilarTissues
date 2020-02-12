@@ -1,0 +1,39 @@
+---
+title: "3. Weighted gene co-expression network analysis (WGCNA)"
+output: github_document
+---
+
+```{r setup, results = 'hide', message = FALSE, warning = FALSE }
+suppressPackageStartupMessages ({
+  library (knitr)
+
+})
+opts_knit$set (root.dir = rprojroot::find_rstudio_root_file())
+opts_chunk$set (eval = TRUE, tidy = TRUE, highlight = TRUE, fig.path = "../Figures/")
+BiocStyle::markdown ()
+```
+
+## Loading expression and phenotypic data
+```{r 3.Data, message = FALSE, warning = FALSE }
+load ("Outputs/HealthyMusclesDataforWGCNA.RData")
+```
+
+## Principal component analysis 
+```{r 3.PCA, message = FALSE, warning = FALSE }
+PC <- prcomp (scale (resid_datasetFilt_control), center = FALSE, scale. = FALSE)
+percent <- 100 * PC$sdev ^ 2 / sum (PC$sdev ^ 2)
+# Batch x muscle:
+PCH <- c (1 : length (unique (phenWGCNA$batch))) [ as.integer (factor (phenWGCNA$batch, levels = c (unique (phenWGCNA$batch)))) ]
+COL <- c ("#000075", "#800000") [ as.integer (factor (phenWGCNA$muscle, levels = c ("0", "1"))) ]
+plot (PC$x [, "PC1" ], PC$x [, "PC2" ], xlab = paste0 ("PC1 (", round(percent [ 1 ], 2), "%)"), 
+    ylab = paste0 ("PC2 (", round(percent [ 2 ], 2), "%)"), pch = PCH, lwd = 1, col = COL, las = 1, 
+    xlim = c (min (PC$x [, "PC1" ]) - 20, max (PC$x [, "PC1" ]) + 20), 
+    ylim = c (min (PC$x [, "PC2" ]) - 20, max (PC$x [, "PC2" ]) + 20))
+title ("Principal component analysis"); legend ("topright", legend = c ("Deltoid", "Biceps"), 
+                        fill = c ("#000075", "#800000"), border = "white")
+```
+
+
+```{r}
+sessionInfo()
+```

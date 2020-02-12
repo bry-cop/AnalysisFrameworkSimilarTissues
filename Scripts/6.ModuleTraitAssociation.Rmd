@@ -1,0 +1,146 @@
+---
+title: "6. Module-trait association"
+output: github_document
+---
+
+```{r setup,  results = 'hide', message = FALSE, warning = FALSE}
+suppressPackageStartupMessages ({ 
+  library (knitr)
+  library(dplyr)
+  library (nlme) 
+  library (reshape2)
+  library (ggplot2)
+  library (gplots)
+  library (RColorBrewer)
+  library (data.table) 
+  library (plyr) 
+  library (limma) })
+opts_knit$set (root.dir = rprojroot::find_rstudio_root_file())
+opts_chunk$set (eval = TRUE, tidy = TRUE, highlight = TRUE, fig.path = "../Figures/")
+BiocStyle::markdown ()
+```
+
+## Data reading
+```{r 6.Data, message = FALSE, warning = FALSE}
+load ("Outputs/HealthyMusclesDataforWGCNA.RData")
+load ("Outputs/DEA.RData")
+# Sample informations
+phenWGCNA <- transform (phenWGCNA, individual = match (subject, unique (subject)))
+phenWGCNA <- phenWGCNA [, c (4, 7, 6, 9) ]
+
+# Module eigengene (ME) vector (selected setting)
+setting = "Power8MinModuleSize15deepSplit2CutHeight0.2"
+mergedMEs <- read.csv (paste0 ("Outputs/WGCNA_MergeModules/ModuleEigengenes_merged_", setting, ".csv"))
+rownames (mergedMEs) <- rownames (resid_datasetFilt_control)
+
+## Rename modules (colors to numbers)
+Module_rename <- data.frame (Module = sort (gsub ("ME", "", colnames(mergedMEs))), Rename = paste ("M", seq.int (length (colnames(mergedMEs))), sep = "."))
+colnames(mergedMEs) <- Module_rename$Rename [ match (gsub ("ME", "", colnames(mergedMEs)), Module_rename$Module) ] 
+
+# Gene modules (selected setting)
+All_gene_modules <- read.csv (paste0("Outputs/WGCNA_MergeModules/All_genes_modules_", setting,".csv"), header = F)
+All_gene_modules$V2 <- Module_rename$Rename [ match (All_gene_modules$V2, Module_rename$Module) ] 
+Module_sizes <- as.data.frame (table (All_gene_modules$V2))
+
+# Final table with sample informations and module eigengene 
+complete_info <- merge (phenWGCNA, mergedMEs, by = "row.names") 
+complete_info <- complete_info %>% 
+  mutate(individual = as.factor (individual)) %>%
+  mutate(muscle = as.factor (ifelse (muscle == 1, "Biceps", "Deltoid"))) %>%
+  mutate(gender = as.factor (gender)) %>%
+  mutate(age = as.integer (age))
+```
+
+## Considering muscle and age as fix effects in a single model (individuals were considered as random effect)
+#### lme (Module_eigengene_vector ~ muscle + age, random=~1|individual, data)
+```{r 6.LinearModel, message = FALSE, warning = FALSE}
+Module_list <- colnames (complete_info) [ grep ("M.", colnames (complete_info)) ]
+Module_trait_pval <- list ()
+for (i in 1: length (grep ("M.", colnames (complete_info)))) {
+  fml <- as.formula (paste (noquote (Module_list [ i ]), "~ muscle + age"))
+    Module_trait_pval [ Module_list [ i ] ] <- data.frame (summary (lme (fml, random=~1|individual, data = complete_info))$tTable [, "p-value" ])
+  }
+Module_trait_pval <- as.data.frame (do.call (rbind, Module_trait_pval))
+colnames (Module_trait_pval) <- c ("Intercept", "muscle", "age") 
+Module_trait_pval$muscle_adj <- p.adjust (Module_trait_pval$muscle, method = "fdr")
+Module_trait_pval$age_adj <- p.adjust (Module_trait_pval$age, method = "fdr")
+rownames (Module_trait_pval) <- paste0 (Module_sizes$Var1, " (", Module_sizes$Freq, ")") [ match (noquote (rownames (Module_trait_pval)), Module_sizes$Var1) ]
+Module_name_size <- rownames (Module_trait_pval) 
+```
+
+## Significant modules
+```{r 6.MuscleRelatedModules, message = FALSE, warning = FALSE}
+Module_trait_pval <- as.data.frame (Module_trait_pval [ apply (Module_trait_pval [, c (4, 5) ], 1, function (x) any (x <= 0.05)), - c (1 : 3) ])
+par (mfrow = c (1, 1), cex = 1.5, mar = c (8, 8.5, 3, 3))
+Module_trait_pval$module <- rownames (Module_trait_pval)
+res <- melt (Module_trait_pval)
+res$variable <- ifelse (res$variable == "muscle_adj", "Muscle (FDR)", "Age (FDR)")
+
+ggplot (res, aes (x = variable, y = module)) + 
+  geom_tile (aes (fill = value)) + 
+  scale_fill_gradientn (colours = c ("white", "red", "black"),
+                        values = scales::rescale (c (0, 0.05, 0.1, 0.5, 1))) +
+  geom_text (aes (label = format (value, digits = 2))) +
+  ggtitle ("Significant modules")  +
+  labs (x = NULL, y = NULL, fill = "FDR") +
+  theme (axis.text = element_text (size = 16),
+         axis.title = element_text (size= 16, face = "bold"))
+
+Module_sig <- res [ res$value < 0.05, ]
+sig_modules <- Module_sig$module
+complete_info <- complete_info [, c(1:5, which(colnames(complete_info) %in% gsub (" .*", "", sig_modules)))]
+All_modules_to_plot <- melt (complete_info [-c(1,3,5)], id.vars = c ("muscle", "age"))
+All_modules_to_plot$ind <- paste (All_modules_to_plot$muscle, All_modules_to_plot$age)
+Module_order <- c ("M.368", "M.202", "M.309", "M.128", "M.103", "M.203", "M.221", "M.225",
+                   "M.29", "M.277", "M.432", "M.117", "M.84", "M.125", "M.395", "M.54", "M.222", "M.367")
+All_modules_to_plot$variable <- as.character (All_modules_to_plot$variable)
+All_modules_to_plot <- All_modules_to_plot [ order (match (All_modules_to_plot$variable, Module_order)), ]
+All_modules_to_plot$variable <- gsub (")", " genes)", sig_modules) [ match (All_modules_to_plot$variable, gsub (" .*", "", sig_modules)) ]
+All_modules_to_plot$variable <- factor (All_modules_to_plot$variable, levels = All_modules_to_plot$variable)
+
+p <- ggplot (All_modules_to_plot, aes (variable, value, fill =  muscle)) +
+  geom_boxplot (alpha = 0.5) +
+  scale_fill_manual (values =  c ( "#e6194B", "#4363d8")) +
+  theme_bw () +
+  labs (x = element_blank (),
+        y = "Module eigengene") +
+  theme (axis.text = element_text (size = 12), 
+         axis.text.y = element_text (colour = rep (c ("#e6194B", "#4363d8"), c (11, 7)), hjust =  1), 
+          axis.title = element_text (size = 12, face = "bold"), 
+          axis.ticks = element_blank (),
+          plot.title = element_text (hjust = 0.5),
+          panel.grid = element_blank(), legend.title = element_blank ()) 
+p + geom_dotplot (binaxis = 'y', stackdir = 'center',
+                    position = position_dodge (1), binwidth = 0.01) +
+  geom_hline (yintercept = 0, linetype = "dashed", color = "grey") + 
+  coord_flip ()
+
+All_gene_modules$V2 <- Module_name_size [ match (All_gene_modules$V2, gsub (" .*", "", Module_name_size)) ]
+Module_gene_sig <- All_gene_modules [ All_gene_modules$V2 %in% sig_modules, ]
+colnames (Module_gene_sig) <- c ("Gene", "Module")
+DE_gene_module_sig <- merge (Module_gene_sig, DE_results [ c (5,7)], by.y = "row.names", by.x = "Gene")
+DE_gene_module_sig$DE_plot [ DE_gene_module_sig$DE == 1] = "Higher expression in biceps"
+DE_gene_module_sig$DE_plot [ DE_gene_module_sig$DE == -1 ] = "Higher expression in deltoid"
+DE_gene_module_sig$DE_plot [ DE_gene_module_sig$DE == 0 ] = "No significant difference"
+DE_gene_module_sig_plot <- ddply (DE_gene_module_sig [, c (2, 5) ], .(DE_gene_module_sig$Module, DE_gene_module_sig$DE_plot), nrow)
+names (DE_gene_module_sig_plot) <- c ("Module", "DE", "Freq")
+values = c ("No significant difference" = "grey", 
+            "Higher expression in biceps" = "#800000", 
+            "Higher expression in deltoid" = "#000075")
+DE_gene_module_sig_plot$module <- paste0 (gsub (" .*", "", Module_sig$module) [ match (DE_gene_module_sig_plot$Module, Module_sig$module) ], " (", round (Module_sig$value [ match (DE_gene_module_sig_plot$Module, Module_sig$module) ], 4), ")")
+DE_gene_module_sig_plot <- DE_gene_module_sig_plot [ order (match (gsub (" .*", "",DE_gene_module_sig_plot$Module),  
+                                                                   Module_order),  DE_gene_module_sig_plot$DE), ]
+DE_gene_module_sig_plot$module <- factor(DE_gene_module_sig_plot$module, levels=DE_gene_module_sig_plot$module)
+
+ggplot (DE_gene_module_sig_plot, aes (module, Freq, fill = DE)) +
+  geom_bar (stat = "identity" ) +
+  theme_bw () + 
+  scale_fill_manual (values = values) + 
+  theme (axis.text.x = element_text (angle = 90, colour = "black", size = 12, hjust = 1, vjust = 0.5),
+          axis.title.x = element_blank (), legend.title = element_blank(), panel.grid = element_blank()) + labs (y = "Number of Genes") 
+```
+
+```{r}
+sessionInfo()
+```
+

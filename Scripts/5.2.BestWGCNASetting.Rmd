@@ -1,0 +1,126 @@
+---
+title: "5. Best WGCNA parameter setting, Co-expressed and Knowledge pairs overlaps"
+output: github_document
+---
+
+```{r setup,  results = 'hide', message = FALSE, warning = FALSE}
+suppressPackageStartupMessages ({ 
+  library (ggplot2)
+  library (grid)
+  library (knitr)
+})
+opts_knit$set (root.dir = rprojroot::find_rstudio_root_file())
+opts_chunk$set (eval = TRUE, tidy = TRUE, highlight = TRUE, fig.path = "../Figures/")
+BiocStyle::markdown ()
+```
+
+```{r 5.Data, message = FALSE, warning = FALSE}
+# WGCNA output for all settings
+SettingsSummary <- read.csv ("Outputs/WGCNA_MergeModules/DifferentSettingsSummary.csv") 
+SettingsSummary$setting <- paste0 ("Power", SettingsSummary$Power,
+                                                "MinModuleSize", SettingsSummary$MinModulesize,
+                                                "deepSplit", SettingsSummary$deepSplit,
+                                                "CutHeight", SettingsSummary$CutHeight)
+
+# Knowldege databases (KD) Reactome or HPO
+KDs <- c ("Reactome", "HPO")
+for (KD in KDs) { 
+  OverlapResults <- read.csv (paste0 ("Outputs/", 
+                                         KD, "_OverlapResults.csv"), header = F)
+  colnames (OverlapResults)  <- c ("setting", paste (c("No_Annotated_Coexpressed_genes",
+                                                                "Ftest", 	"odds_ratio"), KD, sep = "_"))
+  assign (paste0 (KD, "_OverlapResults"), OverlapResults)
+}
+
+OverlapResults <- merge (HPO_OverlapResults, Reactome_OverlapResults, by = "setting")
+Setting <- merge (OverlapResults, SettingsSummary [, - c (6 : 11) ], by = "setting")
+
+# The size of grey module
+filenames <- list.files (recursive = TRUE, path = "Outputs/WGCNA_MergeModules", pattern = "All_genes_modules", full.names = FALSE)
+grey_size <- c ()
+for (file in 1:length (filenames)) {
+  x <- read.csv (paste0 ("Outputs/WGCNA_MergeModules/", filenames [ file ]), header = F)
+  grey_size [ gsub ("All_genes_modules_|.csv", "", filenames [ file ])  ] <- length (unique (x [ x$V2 == "grey", 1 ]))
+}
+grey_size <- as.data.frame (grey_size)
+
+# The final setting table
+Setting <- merge (Setting, grey_size, by.x = "setting", by.y = "row.names")
+cols <- c ("deepSplit", "MinModulesize", "CutHeight", "Power")
+Setting [ cols ] <- lapply (Setting [ cols ], as.character)
+Setting$Power <- factor (Setting$Power, levels =  c ("6", "8", "10", "14", "18", "22"))
+
+head (Setting, 1)
+```
+
+
+```{r 5.BestSetting, message = FALSE, warning = FALSE}
+p1 <- ggplot (Setting) +
+  stat_summary (mapping = aes (x = Power, y = odds_ratio_Reactome),
+                 geom = "point", fun.y = "median") +
+  labs (x = "Power", y = "Reactome's enrichment factor") +
+  theme_bw () +
+  theme (axis.text = element_text (size = 10, colour = "black"),
+          axis.title = element_text (size= 10, face = "bold"), panel.grid = element_blank())
+
+p2 <- ggplot (Setting) +
+  stat_summary (mapping = aes (x = MinModulesize, y = odds_ratio_Reactome),
+                  geom = "point", fun.y = "median") +
+  labs (x = "minClusterSize") +
+  theme_bw () +
+  theme (axis.text = element_text (size = 10, colour = "black"),
+          axis.title = element_text (size= 10, face = "bold"), 
+          axis.title.y = element_blank (), panel.grid = element_blank())
+
+p3 <- ggplot (Setting) +
+  stat_summary (mapping = aes (x = deepSplit, y = odds_ratio_Reactome),
+                  geom = "point", fun.y = "median") +
+  labs (x = "deepSplit") +
+  theme_bw () +
+  theme (axis.text = element_text (size = 10, colour = "black"),
+          axis.title = element_text (size= 10, face = "bold"), 
+          axis.title.y = element_blank (), panel.grid = element_blank())
+
+p4 <- ggplot (Setting) +
+  stat_summary (mapping = aes (x = CutHeight, y = odds_ratio_Reactome),
+                  geom = "point", fun.y = "median") +
+  labs (x = "cutHeight") +
+  theme_bw () +
+  theme (axis.text = element_text (size = 10, colour = "black"),
+          axis.title = element_text (size= 10, face = "bold"), 
+          axis.title.y = element_blank (), panel.grid = element_blank())
+
+grid.newpage ()
+grid.draw (cbind (ggplotGrob (p1), ggplotGrob (p2), ggplotGrob (p3),  
+                    ggplotGrob (p4),                 
+                    size = "first")) 
+
+SettingSubset <- Setting [ Setting$grey_size / 18217 < 0.3, ]
+lim <- c (min (SettingSubset$odds_ratio_HPO, SettingSubset$odds_ratio_Reactome), max (SettingSubset$odds_ratio_HPO, SettingSubset$odds_ratio_Reactome))
+
+ggplot (SettingSubset, aes (x = NoModules, y = odds_ratio_Reactome)) +
+  geom_point (size = 2, alpha = 0.5) +
+  stat_smooth (method = "lm", col = "red") +
+  theme_bw () +
+  labs (x = "Number of modules", y = "Reactome's enrichment factor") +
+  theme (axis.text = element_text (size = 10, colour = "black"),
+          axis.title = element_text (size= 10, face = "bold"), 
+          title = element_text (size= 10, colour = "black"), panel.grid = element_blank())
+
+ggplot (SettingSubset, aes (x = odds_ratio_HPO, y = odds_ratio_Reactome)) +
+  geom_point (size = 2, alpha = 0.2) +
+  labs (x = "HPO's enrichment factor", y = "Reactome's enrichment factor") +
+  theme_bw () +
+  theme (axis.text = element_text (size = 10, colour = "black"),
+          axis.title = element_text (size= 10, face = "bold"), 
+          title = element_text (size= 10, colour = "black"), panel.grid = element_blank ())
+
+
+# Selected setting
+SettingSubset [ which.max(SettingSubset$odds_ratio_Reactome), ]
+```
+
+```{r}
+sessionInfo()
+```
+

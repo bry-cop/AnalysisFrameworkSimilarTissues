@@ -1,0 +1,94 @@
+---
+title: "2. Differential expression analysis (DEA)"
+output: github_document
+---
+
+```{r setup, results = 'hide', message = FALSE, warning = FALSE }
+suppressPackageStartupMessages ({
+  library (knitr)
+  library (edgeR)
+  library (ggplot2)
+  library (ggrepel)
+
+})
+opts_knit$set (root.dir = rprojroot::find_rstudio_root_file())
+opts_chunk$set (eval = TRUE, tidy = TRUE, highlight = TRUE, fig.path = "../Figures/")
+BiocStyle::markdown ()
+```
+
+## Loading expression and phenotypic data
+```{r 2.Data, message = FALSE, warning = FALSE }
+load ("Outputs/HealthyMusclesDataforDEA.RData")
+cols <- c ("gender", "muscle", "batch")
+phen [ cols ] <- lapply (phen [ cols ], factor)
+```
+
+## Principal component analysis 
+```{r 2.PCA, message = FALSE, warning = FALSE }
+PC <- prcomp (scale (datasetFilt_control), center = FALSE, scale. = FALSE)
+percent <- 100 * PC$sdev ^ 2 / sum (PC$sdev ^ 2)
+# Batch x muscle:
+PCH <- c (1 : length (unique (phen$batch))) [ as.integer (factor (phen$batch, levels = c (unique (phen$batch)))) ]
+COL <- c ("#000075", "#800000") [ as.integer (factor (phen$muscle, levels = c ("Deltoid", "Biceps"))) ]
+plot (PC$x [, "PC1" ], PC$x [, "PC2" ], xlab = paste0 ("PC1 (", round(percent [ 1 ], 2), "%)"), 
+    ylab = paste0 ("PC2 (", round(percent [ 2 ], 2), "%)"), pch = PCH, lwd = 1, col = COL, las = 1, 
+    xlim = c (min (PC$x [, "PC1" ]) - 20, max (PC$x [, "PC1" ]) + 20), 
+    ylim = c (min (PC$x [, "PC2" ]) - 20, max (PC$x [, "PC2" ]) + 20))
+title ("Principal component analysis"); legend ("topright", legend = c ("Deltoid", "Biceps"), 
+                        fill = c ("#000075", "#800000"), border = "white")
+```
+
+## DEA
+```{r 2.DEA, message = FALSE, warning = FALSE }
+## Prepararing design matrix 
+design <- model.matrix (~ 0 + phen$muscle + phen$gender)
+colnames (design) <- gsub ("[[:punct:]]|phen", "", colnames (design))
+rownames (design) <- rownames (phen)
+# The batch effect was specified using the block argumen 
+# All arrays from each cohort were processed within the same batch so cohort included in the model rather than batch (Rahimov et al., 2012)
+corfit <- duplicateCorrelation (t (datasetFilt_control), design, block = phen$cohort)
+fit <- lmFit (t (datasetFilt_control), design, block = phen$cohort, correlation = corfit$consensus)
+cm <- makeContrasts (contrast = muscleBiceps - muscleDeltoid, levels = design)
+colnames (cm) <- "MuscleDeltoid_Vs_MuscleBiceps"
+fit2 <- contrasts.fit (fit, cm)
+fit2 <- eBayes (fit2)
+
+# DE results
+DE_results <- topTable (fit2, n = Inf, coef = colnames (cm))
+DE_results$DE <- factor ((DE_results$adj.P.Val <= 0.05) * sign (as.numeric (DE_results$logFC)), levels = c (-1, 0, 1));
+save (DE_results, file = "Outputs/DEA.RData")
+```
+
+### volcano plot
+```{r 2.VocanoPlotDEA, warning = FALSE, message = FALSE}
+xlim <- c (-max (abs (pretty (DE_results $ logFC))), max (abs (pretty (DE_results $ logFC)))) 
+ylim <- c (0, max (pretty (-log10 (DE_results $ P.Value)))) 
+text <- rownames (subset(DE_results, abs (logFC) > 1 & DE != 0))
+              
+Volcano <- ggplot (DE_results, aes (x = logFC, y = -log10 (P.Value))) +
+  geom_point (size = 1, aes (colour = cut(logFC, c(-2, -1, 1, 2)))) +
+  theme_classic () +
+  scale_x_continuous(limits = xlim) +
+  scale_y_continuous(limits = ylim, breaks = seq (0, 12, 2)) +
+  geom_vline (xintercept = c (-1, 1), linetype = "longdash", color = "black") +
+  geom_vline (xintercept = c (-0.5, 0.5), linetype = "dotted", color = "black") +
+  geom_vline (xintercept = 0, linetype = "solid", color = "grey60") +
+  geom_hline (yintercept = -log10 (0.00035), linetype = "dotted", color = "black") +
+  scale_color_manual (values = c("(-2,-1]" = "#000075",
+                                 "(-1,1]" = "black",
+                                 "(1,2]" = "#800000")) +
+  guides(colour = FALSE) +
+  labs (x = "LogFoldChange", y = "-log10(p-value)") +
+  geom_text_repel (data = subset(DE_results, abs (logFC) > 1 & DE != 0), 
+                   aes(label = text), size = 4) +
+  annotate("text", x = c(-1.1, -0.6, -0.1, 0.1, 0.6, 1.1), y = 12, 
+                   label =  c ("4", "18","48", "82","18", "2"), 
+                   colour = c ("#000075", rep ("black", 4), "#800000")) +
+  annotate("text", x = c (-2, 2), y = 3.7, 
+                   label = c ("130", "3.46E.04"))
+Volcano
+```
+
+```{r}
+sessionInfo()
+```
