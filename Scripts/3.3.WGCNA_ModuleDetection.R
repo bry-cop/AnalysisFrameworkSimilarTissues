@@ -46,7 +46,7 @@ foreach (i = 1: nrow (Combin)) %dopar%
     NAMES <- colnames ( dissTOM )
     save (dynamicColors, geneTree, NAMES, file = paste0 ("Outputs/WGCNA_ModuleDetection/ModuleDetectionPower", power ,
                                                          "MinModuleSize", Combin [ i, 1 ] ,
-                                                         "deepSplit", Combin [ i, 2 ], ".RData"))
+                                                         "deepSplit", Combin [ i, 2 ], ".RData")) #Big file not provided.
   }
 
 sessionInfo()

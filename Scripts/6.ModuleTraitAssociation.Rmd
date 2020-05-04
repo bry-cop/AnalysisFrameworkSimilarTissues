@@ -6,14 +6,13 @@ output: github_document
 ```{r setup,  results = 'hide', message = FALSE, warning = FALSE}
 suppressPackageStartupMessages ({ 
   library (knitr)
-  library(dplyr)
+  library (dplyr)
   library (nlme) 
   library (reshape2)
   library (ggplot2)
-  library (gplots)
-  library (RColorBrewer)
-  library (data.table) 
+  library (gProfileR) 
   library (plyr) 
+  library (biomaRt) 
   library (limma) })
 opts_knit$set (root.dir = rprojroot::find_rstudio_root_file())
 opts_chunk$set (eval = TRUE, tidy = TRUE, highlight = TRUE, fig.path = "../Figures/")
@@ -24,13 +23,14 @@ BiocStyle::markdown ()
 ```{r 6.Data, message = FALSE, warning = FALSE}
 load ("Outputs/HealthyMusclesDataforWGCNA.RData")
 load ("Outputs/DEA.RData")
+# WGCNA results of selected setting (Power8MinModuleSize15deepSplit2CutHeight0.2)
+load ("Outputs/WGCNAResultsCandidateSetting")
+
 # Sample informations
 phenWGCNA <- transform (phenWGCNA, individual = match (subject, unique (subject)))
 phenWGCNA <- phenWGCNA [, c (4, 7, 6, 9) ]
 
 # Module eigengene (ME) vector (selected setting)
-setting = "Power8MinModuleSize15deepSplit2CutHeight0.2"
-mergedMEs <- read.csv (paste0 ("Outputs/WGCNA_MergeModules/ModuleEigengenes_merged_", setting, ".csv"))
 rownames (mergedMEs) <- rownames (resid_datasetFilt_control)
 
 ## Rename modules (colors to numbers)
@@ -38,7 +38,6 @@ Module_rename <- data.frame (Module = sort (gsub ("ME", "", colnames(mergedMEs))
 colnames(mergedMEs) <- Module_rename$Rename [ match (gsub ("ME", "", colnames(mergedMEs)), Module_rename$Module) ] 
 
 # Gene modules (selected setting)
-All_gene_modules <- read.csv (paste0("Outputs/WGCNA_MergeModules/All_genes_modules_", setting,".csv"), header = F)
 All_gene_modules$V2 <- Module_rename$Rename [ match (All_gene_modules$V2, Module_rename$Module) ] 
 Module_sizes <- as.data.frame (table (All_gene_modules$V2))
 
@@ -73,7 +72,7 @@ Module_name_size <- rownames (Module_trait_pval)
 Module_trait_pval <- as.data.frame (Module_trait_pval [ apply (Module_trait_pval [, c (4, 5) ], 1, function (x) any (x <= 0.05)), - c (1 : 3) ])
 par (mfrow = c (1, 1), cex = 1.5, mar = c (8, 8.5, 3, 3))
 Module_trait_pval$module <- rownames (Module_trait_pval)
-res <- melt (Module_trait_pval)
+res <- reshape2::melt (Module_trait_pval)
 res$variable <- ifelse (res$variable == "muscle_adj", "Muscle (FDR)", "Age (FDR)")
 
 ggplot (res, aes (x = variable, y = module)) + 
@@ -88,15 +87,15 @@ ggplot (res, aes (x = variable, y = module)) +
 
 Module_sig <- res [ res$value < 0.05, ]
 sig_modules <- Module_sig$module
-complete_info <- complete_info [, c(1:5, which(colnames(complete_info) %in% gsub (" .*", "", sig_modules)))]
-All_modules_to_plot <- melt (complete_info [-c(1,3,5)], id.vars = c ("muscle", "age"))
+complete_info <- complete_info [, c(1:5, which (colnames (complete_info) %in% gsub (" .*", "", sig_modules)))]
+All_modules_to_plot <- reshape2::melt (complete_info [-c(1,3,5)], id.vars = c ("muscle", "age"))
 All_modules_to_plot$ind <- paste (All_modules_to_plot$muscle, All_modules_to_plot$age)
 Module_order <- c ("M.368", "M.202", "M.309", "M.128", "M.103", "M.203", "M.221", "M.225",
                    "M.29", "M.277", "M.432", "M.117", "M.84", "M.125", "M.395", "M.54", "M.222", "M.367")
 All_modules_to_plot$variable <- as.character (All_modules_to_plot$variable)
 All_modules_to_plot <- All_modules_to_plot [ order (match (All_modules_to_plot$variable, Module_order)), ]
 All_modules_to_plot$variable <- gsub (")", " genes)", sig_modules) [ match (All_modules_to_plot$variable, gsub (" .*", "", sig_modules)) ]
-All_modules_to_plot$variable <- factor (All_modules_to_plot$variable, levels = All_modules_to_plot$variable)
+All_modules_to_plot$variable <- factor (All_modules_to_plot$variable, levels = unique (All_modules_to_plot$variable))
 
 p <- ggplot (All_modules_to_plot, aes (variable, value, fill =  muscle)) +
   geom_boxplot (alpha = 0.5) +
@@ -118,6 +117,7 @@ p + geom_dotplot (binaxis = 'y', stackdir = 'center',
 All_gene_modules$V2 <- Module_name_size [ match (All_gene_modules$V2, gsub (" .*", "", Module_name_size)) ]
 Module_gene_sig <- All_gene_modules [ All_gene_modules$V2 %in% sig_modules, ]
 colnames (Module_gene_sig) <- c ("Gene", "Module")
+rownames (DE_results) <- gsub ("-", ".", rownames (DE_results))
 DE_gene_module_sig <- merge (Module_gene_sig, DE_results [ c (5,7)], by.y = "row.names", by.x = "Gene")
 DE_gene_module_sig$DE_plot [ DE_gene_module_sig$DE == 1] = "Higher expression in biceps"
 DE_gene_module_sig$DE_plot [ DE_gene_module_sig$DE == -1 ] = "Higher expression in deltoid"
@@ -130,7 +130,7 @@ values = c ("No significant difference" = "grey",
 DE_gene_module_sig_plot$module <- paste0 (gsub (" .*", "", Module_sig$module) [ match (DE_gene_module_sig_plot$Module, Module_sig$module) ], " (", round (Module_sig$value [ match (DE_gene_module_sig_plot$Module, Module_sig$module) ], 4), ")")
 DE_gene_module_sig_plot <- DE_gene_module_sig_plot [ order (match (gsub (" .*", "",DE_gene_module_sig_plot$Module),  
                                                                    Module_order),  DE_gene_module_sig_plot$DE), ]
-DE_gene_module_sig_plot$module <- factor(DE_gene_module_sig_plot$module, levels=DE_gene_module_sig_plot$module)
+DE_gene_module_sig_plot$module <- factor (DE_gene_module_sig_plot$module, levels = unique (DE_gene_module_sig_plot$module))
 
 ggplot (DE_gene_module_sig_plot, aes (module, Freq, fill = DE)) +
   geom_bar (stat = "identity" ) +
@@ -138,6 +138,49 @@ ggplot (DE_gene_module_sig_plot, aes (module, Freq, fill = DE)) +
   scale_fill_manual (values = values) + 
   theme (axis.text.x = element_text (angle = 90, colour = "black", size = 12, hjust = 1, vjust = 0.5),
           axis.title.x = element_blank (), legend.title = element_blank(), panel.grid = element_blank()) + labs (y = "Number of Genes") 
+```
+
+## Enrichment analysis
+```{r 6.EnrichmentAnalysis, message = FALSE, warning = FALSE}
+human <- useMart ("ensembl", dataset = "hsapiens_gene_ensembl", host = "http://Apr2018.archive.ensembl.org")
+annot_ens92 <- getBM (attributes = c ("ensembl_gene_id", "external_gene_name"), mart = human)
+human <- useMart ("ensembl", dataset = "hsapiens_gene_ensembl", host = "http://Jul2018.archive.ensembl.org")
+annot_ens93 <- getBM (attributes = c ("ensembl_gene_id", "external_gene_name"), mart = human)
+Annot_ENS_GeneNames <- merge (annot_ens93, annot_ens92, all = T) %>%
+  filter (external_gene_name  %in% c (gsub ("___.*", "", rownames(DE_results)), 
+                                      gsub ("\\.", "-", gsub ("___.*", "", rownames (DE_results)))))
+
+for (module in unique (DE_gene_module_sig$Module)) {
+  Gene_list <- gsub ("___.*" , "" , (unique (as.vector (DE_gene_module_sig [ DE_gene_module_sig$Module == module, 1 ] ))))
+  Annot_ENS_subset <- unique (Annot_ENS_GeneNames [ Annot_ENS_GeneNames$external_gene_name %in% c (Gene_list, gsub ("\\.", "-", Gene_list)), 1 ])
+  BG <- unique (as.vector (Annot_ENS_GeneNames $ ensembl_gene_id))
+  GP <- gprofiler (Annot_ENS_subset, organism = 'hsapiens',
+                   domain_size = "known", custom_bg = BG, correction_method = "fdr")
+  if (dim (GP) [ 1 ] > 0) {
+    GP$Module <- module
+    assign (paste ("GP", module, sep = "_"), GP)
+  }
+}
+
+# The final table
+GP_all_sig_modules <- do.call (rbind, lapply (ls (patt = "GP_"), get))
+GP_all_sig_modules$query.number <- NULL
+dim ( GP_all_sig_modules )
+rm (list = setdiff (ls (pattern = "GP"), "GP_all_sig_modules"))
+## Gene mapping
+Gene_Symbols <- list ( )
+for (i in 1:nrow (GP_all_sig_modules)) {
+  ENS <- GP_all_sig_modules [ i, "intersection" ]
+  ENS <- unique (unlist (strsplit (as.character (ENS), split = ",")))
+  Gene_Symbol <- c ( )
+  for (j in ENS) {
+    Gene_Symbol [ j ] <- Annot_ENS_GeneNames [ Annot_ENS_GeneNames$ensembl_gene_id == j, 2 ]
+  }
+Gene_Symbols [[ i ]] <- paste (Gene_Symbol, collapse = ",")
+}
+Gene_Symbols <- do.call (rbind, Gene_Symbols)
+GP_all_sig_modules <- cbind (GP_all_sig_modules, Gene_Symbols)
+write.csv (GP_all_sig_modules, paste0 ("Outputs/EnrichmentResultsMuscleRelatedModules.csv"), row.names = F)
 ```
 
 ```{r}

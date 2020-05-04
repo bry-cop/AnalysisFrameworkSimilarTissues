@@ -48,7 +48,7 @@ foreach (i = seq_along (power)) %dopar%
     dissTOM <- 1 - TOM
     # Hierarchical gene clustering (according to the dissimilarity matrix)
     geneTree <- flashClust :: flashClust (as.dist (dissTOM), method = "average")
-    save (dissTOM, geneTree, file = paste0 ("Outputs/WGCNA_dissTOM/dissTOMPower", power [ i ], ".RData"))
+    save (dissTOM, geneTree, file = paste0 ("Outputs/WGCNA_dissTOM/dissTOMPower", power [ i ], ".RData")) #Big file not provided.
   }
 
 sessionInfo()

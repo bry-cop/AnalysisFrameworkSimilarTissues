@@ -1,6 +1,8 @@
 ---
 title: "5. Best WGCNA parameter setting, Co-expressed and Knowledge pairs overlaps"
 output: github_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup,  results = 'hide', message = FALSE, warning = FALSE}
@@ -16,11 +18,11 @@ BiocStyle::markdown ()
 
 ```{r 5.Data, message = FALSE, warning = FALSE}
 # WGCNA output for all settings
-SettingsSummary <- read.csv ("Outputs/WGCNA_MergeModules/DifferentSettingsSummary.csv") 
-SettingsSummary$setting <- paste0 ("Power", SettingsSummary$Power,
+SettingsSummary <- read.csv ("Outputs/WGCNA_MergeModules/DifferentSettingsSummary.csv", as.is = T)
+SettingsSummary$setting <- as.character (paste0 ("Power", SettingsSummary$Power,
                                                 "MinModuleSize", SettingsSummary$MinModulesize,
                                                 "deepSplit", SettingsSummary$deepSplit,
-                                                "CutHeight", SettingsSummary$CutHeight)
+                                                "CutHeight", SettingsSummary$CutHeight))
 
 # Knowldege databases (KD) Reactome or HPO
 KDs <- c ("Reactome", "HPO")
@@ -35,16 +37,18 @@ for (KD in KDs) {
 OverlapResults <- merge (HPO_OverlapResults, Reactome_OverlapResults, by = "setting")
 Setting <- merge (OverlapResults, SettingsSummary [, - c (6 : 11) ], by = "setting")
 
+
 # The size of grey module
-filenames <- list.files (recursive = TRUE, path = "Outputs/WGCNA_MergeModules", pattern = "All_genes_modules", full.names = FALSE)
+e <- new.env(); load("Outputs/WGCNA_MergeModules/AllGenesModules.RData", envir = e)
 grey_size <- c ()
-for (file in 1:length (filenames)) {
-  x <- read.csv (paste0 ("Outputs/WGCNA_MergeModules/", filenames [ file ]), header = F)
-  grey_size [ gsub ("All_genes_modules_|.csv", "", filenames [ file ])  ] <- length (unique (x [ x$V2 == "grey", 1 ]))
+for (file in ls (e)) {
+  x <- get (file, envir = e)
+  grey_size [ file  ] <- length (unique (x [ x$V2 == "grey", 1 ]))
 }
 grey_size <- as.data.frame (grey_size)
 
 # The final setting table
+Setting$setting <- gsub ("Module", "", Setting$setting)
 Setting <- merge (Setting, grey_size, by.x = "setting", by.y = "row.names")
 cols <- c ("deepSplit", "MinModulesize", "CutHeight", "Power")
 Setting [ cols ] <- lapply (Setting [ cols ], as.character)

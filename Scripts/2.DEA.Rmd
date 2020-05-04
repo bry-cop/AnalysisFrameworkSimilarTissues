@@ -6,10 +6,13 @@ output: github_document
 ```{r setup, results = 'hide', message = FALSE, warning = FALSE }
 suppressPackageStartupMessages ({
   library (knitr)
+  library (limma)
   library (edgeR)
   library (ggplot2)
+  library (gProfileR)
+  library (biomaRt)
   library (ggrepel)
-
+  library (dplyr)
 })
 opts_knit$set (root.dir = rprojroot::find_rstudio_root_file())
 opts_chunk$set (eval = TRUE, tidy = TRUE, highlight = TRUE, fig.path = "../Figures/")
@@ -44,8 +47,6 @@ title ("Principal component analysis"); legend ("topright", legend = c ("Deltoid
 design <- model.matrix (~ 0 + phen$muscle + phen$gender)
 colnames (design) <- gsub ("[[:punct:]]|phen", "", colnames (design))
 rownames (design) <- rownames (phen)
-# The batch effect was specified using the block argumen 
-# All arrays from each cohort were processed within the same batch so cohort included in the model rather than batch (Rahimov et al., 2012)
 corfit <- duplicateCorrelation (t (datasetFilt_control), design, block = phen$cohort)
 fit <- lmFit (t (datasetFilt_control), design, block = phen$cohort, correlation = corfit$consensus)
 cm <- makeContrasts (contrast = muscleBiceps - muscleDeltoid, levels = design)
@@ -61,7 +62,7 @@ save (DE_results, file = "Outputs/DEA.RData")
 
 ### volcano plot
 ```{r 2.VocanoPlotDEA, warning = FALSE, message = FALSE}
-xlim <- c (-max (abs (pretty (DE_results $ logFC))), max (abs (pretty (DE_results $ logFC)))) 
+xlim <- c (-max (abs (pretty (DE_results $ logFC))), max (abs (pretty (DE_results$logFC)))) 
 ylim <- c (0, max (pretty (-log10 (DE_results $ P.Value)))) 
 text <- rownames (subset(DE_results, abs (logFC) > 1 & DE != 0))
               
@@ -81,12 +82,35 @@ Volcano <- ggplot (DE_results, aes (x = logFC, y = -log10 (P.Value))) +
   labs (x = "LogFoldChange", y = "-log10(p-value)") +
   geom_text_repel (data = subset(DE_results, abs (logFC) > 1 & DE != 0), 
                    aes(label = text), size = 4) +
-  annotate("text", x = c(-1.1, -0.6, -0.1, 0.1, 0.6, 1.1), y = 12, 
-                   label =  c ("4", "18","48", "82","18", "2"), 
+  annotate("text", x = c(-1.1, -0.6, -0.1, 0.1, 0.6, 1.1), y = 12,
+                   label =  c (nrow (DE_results %>% filter (DE !=0) %>% filter ( logFC <= -1)),
+                               nrow (DE_results %>% filter (DE !=0) %>% filter ( logFC <= -0.5)),
+                               nrow (DE_results %>% filter (DE !=0) %>% filter ( logFC < 0)),
+                               nrow (DE_results %>% filter (DE !=0) %>% filter ( logFC > 0)),
+                               nrow (DE_results %>% filter (DE !=0) %>% filter ( logFC > 0.5)),
+                               nrow (DE_results %>% filter (DE !=0) %>% filter ( logFC > 1))),
                    colour = c ("#000075", rep ("black", 4), "#800000")) +
   annotate("text", x = c (-2, 2), y = 3.7, 
-                   label = c ("130", "3.46E.04"))
+                    label = c (nrow (DE_results %>% filter (DE !=0)), "3.46E.04"))
 Volcano
+```
+
+## Enrichment analysis
+```{r 2.EnrichmentAnalysis, message = FALSE, warning = FALSE}
+human <- useMart ("ensembl", dataset = "hsapiens_gene_ensembl", host = "http://Apr2018.archive.ensembl.org")
+annot_ens92 <- getBM (attributes = c ("ensembl_gene_id", "external_gene_name"), mart = human)
+human <- useMart ("ensembl", dataset = "hsapiens_gene_ensembl", host = "http://Jul2018.archive.ensembl.org")
+annot_ens93 <- getBM (attributes = c ("ensembl_gene_id", "external_gene_name"), mart = human)
+Annot_ENS_GeneNames <- merge (annot_ens93, annot_ens92, all = T) %>%
+  filter (external_gene_name  %in% c (gsub ("___.*", "", rownames(DE_results)), 
+                                      gsub ("\\.", "-", gsub ("___.*", "", rownames (DE_results)))))
+
+Gene_list <- unique (gsub ("___.*" , "" , (rownames(DE_results)[DE_results$DE!=0])))
+Annot_ENS_subset <- unique (Annot_ENS_GeneNames [ Annot_ENS_GeneNames$external_gene_name %in% c (Gene_list, gsub ("\\.", "-", Gene_list)), 1 ])
+BG <- unique (as.vector (Annot_ENS_GeneNames $ ensembl_gene_id))
+GP <- gprofiler (Annot_ENS_subset, organism = 'hsapiens',
+                 domain_size = "known", custom_bg = BG, correction_method = "fdr")
+dim (GP %>% filter (!domain %in% c("cor", "tf")))
 ```
 
 ```{r}
